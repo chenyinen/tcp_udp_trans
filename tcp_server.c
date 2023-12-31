@@ -97,6 +97,8 @@ void recv_handle(struct client_info *client)
         list_del(&client->list);
         if (client->fp) {
             printf("file save\n");
+            fflush(client->fp);
+            fsync(client->client_fd);
             fclose(client->fp);
         }
         free(client);
@@ -134,7 +136,7 @@ void recv_handle(struct client_info *client)
                 recv_bytes = recv(recv_fd, client->line_buf + recv_total, data_len - recv_total, 0);
                 recv_total += recv_bytes;
             }
-            fwrite(client->line_buf, recv_bytes, 1, client->fp);
+            fwrite(client->line_buf, recv_total, 1, client->fp);
             break;
         }
         default: {

@@ -5,8 +5,9 @@
 #include <errno.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include "log.h"
 
-#define SERVER_IP "127.0.0.1"
+#define SERVER_IP "121.40.46.148"
 #define PORT 9988
 
 #define NETWORK_MTU 1420
@@ -33,19 +34,21 @@ int main(int argc, char **argv)
     void *p;
     int i;
 
+    log_level_string(0);
+
     while ((option = getopt(argc, argv, "p:")) != -1) {
         switch (option) {
             case 'p':
                 snprintf(file, sizeof(file)-1, "%s", optarg);
                 break;
             default:
-                printf("Invalid option\n");
+                printf("Invalid option");
                 return 1;
         }
     }
     fp = fopen(file, "rb");
     if (!fp) {
-        printf("open file:%s error:%s\n", file, strerror(errno));
+        log_error("open file:%s error:%s", file, strerror(errno));
         return -1;
     }
 
@@ -73,7 +76,7 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
-    printf("Connected to server\n");
+    log_debug("Connected to server");
     p = strrchr(file, '/');
     if (p) {
         p++;
@@ -107,7 +110,7 @@ int main(int argc, char **argv)
 
     close(client_fd);
 
-    printf("trans over\n");
+    log_debug("trans over");
 
     return 0;
 }

@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 #include <sys/epoll.h>
 #include "list.h"
+#include "log.h"
 
 #define MAX_EVENTS 10
 #define PORT 9988
@@ -51,20 +52,20 @@ int server_init()
 
     // 绑定地址
     if (bind(server_module.server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-        printf("socket bind fail\n");
+        log_error("socket bind fail");
         close(server_module.server_fd);
         return -1;
     }
     // 监听
     if (listen(server_module.server_fd, 5) < 0) {
-        printf("listen fail\n");
+        log_error("listen fail");
         close(server_module.server_fd);
         return -1;
     }
      // 创建epoll
     server_module.epoll_fd = epoll_create1(0);
     if (server_module.epoll_fd  < 0) {
-        printf("epoll create fail\n");
+        log_error("epoll create fail");
         close(server_module.server_fd);
         return -1;
     }
@@ -79,6 +80,20 @@ int server_init()
     INIT_LIST_HEAD(&server_module.client_list);
     return 0;
 }
+int tcp_recv(int fd, void *buf, size_t n, int flags)
+{
+    int recv_total = 0;
+    int recv_bytes;
+
+    while(recv_total < n) {
+        recv_bytes = recv(fd, buf + recv_total, n - recv_total, 0);
+        if(0 == recv_bytes) {
+            return 0;
+        }
+        recv_total += recv_bytes;
+    }
+    return recv_total;
+}
 void recv_handle(struct client_info *client)
 {
     int recv_bytes;
@@ -90,40 +105,33 @@ void recv_handle(struct client_info *client)
     int recv_total;
 
     recv_fd = client->client_fd;
-    recv_bytes = recv(recv_fd, &msg, sizeof(msg), MSG_DONTWAIT);
+    recv_bytes = tcp_recv(recv_fd, &msg, sizeof(msg), MSG_DONTWAIT);
     if (recv_bytes == 0) { //关闭链接
-        epoll_ctl(server_module.epoll_fd, EPOLL_CTL_DEL, recv_fd, NULL);
-        close(recv_fd);
-        list_del(&client->list);
-        if (client->fp) {
-            printf("file save\n");
-            fflush(client->fp);
-            fsync(client->client_fd);
-            fclose(client->fp);
-        }
-        free(client);
-        return ;
+        goto clean_up;
     }
     if (recv_bytes != sizeof(msg)) {
-        printf("recv bytes number error\n");
+        log_warn("recv bytes number error, %d != %d", recv_bytes, sizeof(msg));
         return ;
     }
     data_len = ntohl(msg.data_len);
     if (data_len >= sizeof(client->line_buf)) {
-        printf("recv data too long:%d\n", data_len);
+        log_warn("recv data too long:%d", data_len);
         return ;
     }
     switch(msg.cmd) {
         case 0x80: { //准备传输文件
-            recv_bytes = recv(recv_fd, client->line_buf, data_len, MSG_DONTWAIT);
+            recv_bytes = tcp_recv(recv_fd, client->line_buf, data_len, MSG_DONTWAIT);
+            if (recv_bytes == 0) { //关闭链接
+                goto clean_up;
+            }
             client->line_buf[recv_bytes] = '\0';
             snprintf(buf, sizeof(buf) - 1, "%s", client->line_buf);
             client->fp = fopen(buf, "wb");
             if (!client->fp) {
-                printf("fopen %s fail:%s\n", client->line_buf, strerror(errno));
+                log_error("fopen %s fail:%s", client->line_buf, strerror(errno));
                 return ;
             }
-            printf("begin save file:%s\n", buf);
+            log_debug("begin save file:%s", buf);
             memset(&msg, 0, sizeof(msg));
             msg.cmd = 0x80;
             msg.conv = htonl(client->conv);
@@ -131,18 +139,32 @@ void recv_handle(struct client_info *client)
             break;
         }
         case 0x81: {
-            recv_total = 0;
-            while(recv_total < data_len) {
-                recv_bytes = recv(recv_fd, client->line_buf + recv_total, data_len - recv_total, 0);
-                recv_total += recv_bytes;
+            recv_bytes = tcp_recv(recv_fd, client->line_buf, data_len, 0);
+            if (recv_bytes == 0) { //关闭链接
+                goto clean_up;
             }
-            fwrite(client->line_buf, recv_total, 1, client->fp);
+            fwrite(client->line_buf, recv_bytes, 1, client->fp);
             break;
         }
         default: {
             break;
         }
     }
+    return ;
+clean_up:
+    if (recv_bytes == 0) {
+        log_info("tcp client close");
+    }
+    epoll_ctl(server_module.epoll_fd, EPOLL_CTL_DEL, recv_fd, NULL);
+    close(recv_fd);
+    list_del(&client->list);
+    if (client->fp) {
+        log_debug("file save");
+        fflush(client->fp);
+        fsync(client->client_fd);
+        fclose(client->fp);
+    }
+    free(client);
     return ;
 }
 int create_conv()
@@ -161,13 +183,15 @@ int main()
     struct client_info *client_node, *tmp;
     socklen_t client_addr_len;
 
+    log_level_string(0);
+
     ret = server_init();
     if (0 != ret) {
-        printf("server_init fail:%d\n", ret);
+        log_error("server_init fail:%d", ret);
         return -1;
     }
 
-    printf("Server is listening on port %d\n", PORT);
+    log_debug("Server is listening on port %d", PORT);
 
     while (1) {
         nfds = epoll_wait(server_module.epoll_fd, events, sizeof(events)/sizeof(events[0]), 500);
@@ -179,17 +203,17 @@ int main()
                 client_addr_len = sizeof(client_addr);
                 client_fd = accept(server_module.server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
                 if (client_fd < 0) {
-                    printf("accept fail:%s\n", strerror(errno));
+                    log_error("accept fail:%s", strerror(errno));
                     continue;
                 }
                 char ip_address[INET_ADDRSTRLEN];
                 if (inet_ntop(AF_INET, &(client_addr.sin_addr), ip_address, INET_ADDRSTRLEN) != NULL) {
-                    printf("Client connected: %s:%d\n", ip_address, ntohs(client_addr.sin_port));
+                    log_info("Client connected: %s:%d", ip_address, ntohs(client_addr.sin_port));
                 }
                 event.events = EPOLLIN;
                 event.data.fd = client_fd;
                 if (epoll_ctl(server_module.epoll_fd, EPOLL_CTL_ADD, client_fd, &event) < 0) {
-                    printf("epoll add fail\n");
+                    log_error("epoll add fail");
                     close(client_fd);
                     continue;
                 }
@@ -198,7 +222,7 @@ int main()
                 client_node->conv = create_conv();
                 memcpy(&client_node->client_addr, &client_addr, sizeof(client_addr));
                 list_add(&client_node->list, &server_module.client_list);
-                printf("Accepted a new connection\n");
+                log_debug("Accepted a new connection");
             } else {
                 list_for_each_entry_safe(client_node, tmp, &server_module.client_list, list) {
                     if (client_node->client_fd == events[n].data.fd) {

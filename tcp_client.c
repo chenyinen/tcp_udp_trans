@@ -94,13 +94,16 @@ int main(int argc, char **argv)
     recv(client_fd, &recv_msg, sizeof(recv_msg), 0);
     
     int pack;
-
+    float progress;
     for (i=0; i<fileSize / NETWORK_MTU; i++) {
         msg->cmd = 0x81;
         msg->conv = recv_msg.conv;
         msg->data_len = htonl(NETWORK_MTU);
         memcpy(msg->data, &fileContent[NETWORK_MTU*i], NETWORK_MTU);
         send(client_fd, msg, sizeof(*msg) + NETWORK_MTU, 0);
+        progress = (float)100 *i*NETWORK_MTU/ fileSize;
+        printf("file progress:%.2f\r", progress);
+        fflush(stdout);
     }
     if (fileSize % NETWORK_MTU != 0) {
         msg->data_len = htonl(fileSize % NETWORK_MTU);
@@ -110,7 +113,7 @@ int main(int argc, char **argv)
 
     close(client_fd);
 
-    log_debug("trans over");
+    log_debug("file trans over");
 
     return 0;
 }

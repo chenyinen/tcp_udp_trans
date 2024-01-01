@@ -115,7 +115,7 @@ void recv_handle(struct client_info *client)
     }
     data_len = ntohl(msg.data_len);
     if (data_len >= sizeof(client->line_buf)) {
-        log_warn("recv data too long:%d", data_len);
+        log_warn("recv data too long:%d, recv_bytes=%d", data_len, recv_bytes);
         return ;
     }
     switch(msg.cmd) {

@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include "log.h"
 
 #define SERVER_IP "121.40.46.148"
@@ -95,6 +96,11 @@ int main(int argc, char **argv)
     
     int pack;
     float progress;
+    struct timeval start, end;
+    time_t time_used;
+    gettimeofday(&start, NULL);  // 记录开始时间
+
+    
     for (i=0; i<fileSize / NETWORK_MTU; i++) {
         msg->cmd = 0x81;
         msg->conv = recv_msg.conv;
@@ -110,10 +116,11 @@ int main(int argc, char **argv)
         memcpy(msg->data, &fileContent[fileSize / NETWORK_MTU * NETWORK_MTU], fileSize % NETWORK_MTU);
         send(client_fd, msg, sizeof(*msg) + fileSize % NETWORK_MTU, 0);
     }
-
+    gettimeofday(&end, NULL);  // 记录结束时间
+    time_used = (end.tv_sec - start.tv_sec) + (end.tv_usec - start.tv_usec) / 1000000.0;  // 计算耗时
     close(client_fd);
 
-    log_debug("file trans over");
+    log_debug("file trans over, user %ds", time_used);
 
     return 0;
 }

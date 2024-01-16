@@ -86,7 +86,7 @@ int tcp_recv(int fd, void *buf, size_t n, int flags)
     int recv_bytes;
 
     while(recv_total < n) {
-        recv_bytes = recv(fd, buf + recv_total, n - recv_total, 0);
+        recv_bytes = recv(fd, buf + recv_total, n - recv_total, MSG_DONTWAIT);
         if(0 == recv_bytes) {
             return 0;
         }
